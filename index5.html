@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azeroth Nexus - Archiviste Suprême</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --gold: #c6a15b; --gold-dark: #846b3e; --bg: #0a0a0c;
+            --panel: #16181d; --border: #323641; --text: #e2e2e2;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; height: 100vh; overflow: hidden; }
+        
+        header { 
+            height: 60px; background: #000; border-bottom: 2px solid var(--gold);
+            display: flex; align-items: center; padding: 0 20px; justify-content: space-between; z-index: 100;
+        }
+
+        #main { display: flex; height: calc(100vh - 60px); }
+
+        /* --- MAP SYSTEM --- */
+        #map-container { flex: 1; position: relative; background: #050505; overflow: hidden; cursor: crosshair; }
+        #map-wrapper { position: absolute; transform-origin: 0 0; }
+        .map-layer { position: absolute; top: 0; left: 0; pointer-events: none; }
+        #base-layer { position: relative; pointer-events: auto; }
+        
+        /* --- DRAWING & LABELS --- */
+        svg#vector-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 40; }
+        .zone-poly { stroke-width: 1; stroke: white; cursor: pointer; pointer-events: auto; }
+        
+        .floating-label {
+            position: absolute; transform: translate(-50%, -50%);
+            color: var(--gold); font-family: 'Cinzel'; font-weight: bold;
+            text-shadow: 2px 2px 4px #000, -1px -1px 0 #000;
+            white-space: nowrap; pointer-events: none; z-index: 50;
+            text-transform: uppercase; letter-spacing: 2px;
+        }
+
+        .poi-marker {
+            position: absolute; width: 10px; height: 10px; background: var(--gold);
+            border: 1px solid white; border-radius: 50%; transform: translate(-50%, -50%);
+            z-index: 45; pointer-events: none;
+        }
+
+        /* --- TOOLS --- */
+        #map-tools {
+            position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.9);
+            padding: 15px; border: 1px solid var(--gold-dark); border-radius: 4px; display: flex; flex-direction: column; gap: 8px; z-index: 110;
+        }
+        .btn { 
+            background: var(--panel); border: 1px solid var(--gold-dark); color: var(--gold);
+            padding: 8px 12px; cursor: pointer; font-family: 'Cinzel'; font-size: 10px; transition: 0.2s;
+        }
+        .btn.active { background: var(--gold); color: #000; }
+        .btn-del { color: #ff4d4d; border-color: #ff4d4d; padding: 2px 5px; font-size: 9px; }
+
+        /* --- SIDEBAR --- */
+        #sidebar { width: 380px; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); background: rgba(0,0,0,0.2); }
+        .sidebar-scroll { flex: 1; overflow-y: auto; padding: 20px; }
+
+        .lib-item {
+            background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+            padding: 12px; margin-bottom: 10px; border-radius: 4px;
+        }
+        .lib-item h4 { font-family: 'Cinzel'; color: var(--gold); font-size: 13px; display: flex; justify-content: space-between; }
+        .tag { font-size: 9px; padding: 2px 6px; background: #333; border-radius: 10px; text-transform: uppercase; }
+
+        .temp-dot { width: 6px; height: 6px; background: red; position: absolute; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h2 style="font-family:'Cinzel'; color:var(--gold)">Azeroth <span style="font-weight:200">Nexus Codex</span></h2>
+    <div style="display:flex; gap:10px">
+        <button class="btn" onclick="document.getElementById('file-map').click()">Importer Carte</button>
+        <button class="btn" onclick="exportData()">Sauvegarder Projet</button>
+        <input type="file" id="file-map" style="display:none" onchange="loadImg(event)">
+    </div>
+</header>
+
+<div id="main">
+    <div id="map-container">
+        <div id="map-tools">
+            <label style="font-size:9px">ÉDITION CARTOGRAPHIQUE</label>
+            <button class="btn" id="btn-poi" onclick="setMode('poi')">Lieu (Marqueur)</button>
+            <button class="btn" id="btn-label" onclick="setMode('label')">Légende (Texte)</button>
+            <button class="btn" id="btn-zone" onclick="setMode('zone')">Territoire (Zone)</button>
+            
+            <hr style="border:0; border-top:1px solid var(--border); margin:5px 0">
+            
+            <label style="font-size:9px">STYLE DE ZONE</label>
+            <select id="zone-color" class="btn">
+                <option value="rgba(128, 0, 128, 0.4)">Empire Noir</option>
+                <option value="rgba(0, 191, 255, 0.4)">Titans</option>
+                <option value="rgba(255, 69, 0, 0.4)">Trolls</option>
+                <option value="rgba(50, 205, 50, 0.4)">Nature</option>
+            </select>
+            <p id="mode-hint" style="font-size:9px; color:var(--gold-dark); margin-top:5px">Mode actuel : Marqueur</p>
+        </div>
+
+        <div id="map-wrapper">
+            <svg id="vector-layer"></svg>
+            <img id="base-layer" class="map-layer" src="https://via.placeholder.com/2000x1500/111/c6a15b?text=Veuillez+importer+une+carte+d'Azeroth">
+            <div id="marker-layer"></div>
+            <div id="label-layer"></div>
+            <div id="temp-layer"></div>
+        </div>
+    </div>
+
+    <aside id="sidebar">
+        <div class="sidebar-header">
+            <h3 style="font-family:'Cinzel'">Bibliothèque</h3>
+            <input type="text" id="lib-search" placeholder="Filtrer les archives..." oninput="renderLibrary()" 
+                   style="width:100%; margin-top:10px; background:#000; border:1px solid var(--border); color:white; padding:8px; font-size:12px">
+        </div>
+        <div class="sidebar-scroll" id="lib-list">
+            </div>
+    </aside>
+</div>
+
+<script>
+    let scale = 1, x = 0, y = 0, isDragging = false;
+    let mode = 'poi'; // poi, label, zone
+    let database = JSON.parse(localStorage.getItem('az_codex_db')) || { pois: [], labels: [], zones: [] };
+    let currentPath = [];
+
+    const wrapper = document.getElementById('map-wrapper');
+    const container = document.getElementById('map-container');
+    const svgLayer = document.getElementById('vector-layer');
+
+    window.onload = () => { renderAll(); updateModeUI(); };
+
+    // NAVIGATION
+    container.onwheel = (e) => {
+        e.preventDefault();
+        scale = Math.min(Math.max(0.2, scale * (e.deltaY > 0 ? 0.9 : 1.1)), 5);
+        updateTransform();
+    };
+    container.onmousedown = (e) => { if (e.button === 1 || e.ctrlKey) { isDragging = true; startX = e.clientX - x; startY = e.clientY - y; } };
+    window.onmousemove = (e) => { if (isDragging) { x = e.clientX - startX; y = e.clientY - startY; updateTransform(); } };
+    window.onmouseup = () => isDragging = false;
+    function updateTransform() { wrapper.style.transform = `translate(${x}px, ${y}px) scale(${scale})`; }
+
+    // GESTION DES MODES
+    function setMode(m) {
+        mode = m; currentPath = []; 
+        document.getElementById('temp-layer').innerHTML = '';
+        updateModeUI();
+    }
+
+    function updateModeUI() {
+        ['poi', 'label', 'zone'].forEach(m => document.getElementById('btn-'+m).className = mode === m ? 'btn active' : 'btn');
+        document.getElementById('mode-hint').innerText = "Mode : " + (mode === 'poi' ? 'Marqueur' : mode === 'label' ? 'Légende' : 'Dessin de Zone');
+    }
+
+    // CLIC SUR CARTE
+    document.getElementById('base-layer').onclick = (e) => {
+        const rect = e.target.getBoundingClientRect();
+        const px = ((e.clientX - rect.left) / rect.width * 100);
+        const py = ((e.clientY - rect.top) / rect.height * 100);
+
+        if (mode === 'poi') {
+            const val = prompt("Nom du lieu :");
+            if (val) { database.pois.push({ id: Date.now(), name: val, x: px, y: py }); save(); }
+        } 
+        else if (mode === 'label') {
+            const val = prompt("Texte de la légende :");
+            const size = prompt("Taille (px) :", "18");
+            if (val) { database.labels.push({ id: Date.now(), text: val, size: size || 18, x: px, y: py }); save(); }
+        }
+        else if (mode === 'zone') {
+            handleZone(px, py);
+        }
+    };
+
+    function handleZone(px, py) {
+        if (currentPath.length > 2) {
+            const start = currentPath[0];
+            if (Math.sqrt(Math.pow(px-start.x, 2) + Math.pow(py-start.y, 2)) < 1.5) {
+                const val = prompt("Nom du territoire :");
+                if (val) {
+                    database.zones.push({ id: Date.now(), name: val, path: currentPath, color: document.getElementById('zone-color').value });
+                    currentPath = []; save(); return;
+                }
+            }
+        }
+        currentPath.push({ x: px, y: py });
+        renderTemp();
+    }
+
+    // SAUVEGARDE ET RENDU
+    function save() {
+        localStorage.setItem('az_codex_db', JSON.stringify(database));
+        renderAll();
+    }
+
+    function renderAll() {
+        // 1. POIs
+        const mLayer = document.getElementById('marker-layer');
+        mLayer.innerHTML = '';
+        database.pois.forEach(p => {
+            const d = document.createElement('div');
+            d.className = 'poi-marker'; d.style.left = p.x + '%'; d.style.top = p.y + '%';
+            mLayer.appendChild(d);
+        });
+
+        // 2. LABELS
+        const lLayer = document.getElementById('label-layer');
+        lLayer.innerHTML = '';
+        database.labels.forEach(l => {
+            const d = document.createElement('div');
+            d.className = 'floating-label'; d.innerText = l.text;
+            d.style.left = l.x + '%'; d.style.top = l.y + '%';
+            d.style.fontSize = l.size + 'px';
+            lLayer.appendChild(d);
+        });
+
+        // 3. ZONES (SVG)
+        svgLayer.innerHTML = '';
+        database.zones.forEach(z => {
+            const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+            poly.setAttribute("points", z.path.map(p => `${p.x},${p.y}`).join(' '));
+            poly.setAttribute("fill", z.color);
+            poly.setAttribute("class", "zone-poly");
+            svgLayer.appendChild(poly);
+        });
+
+        renderLibrary();
+    }
+
+    function renderLibrary() {
+        const list = document.getElementById('lib-list');
+        const search = document.getElementById('lib-search').value.toLowerCase();
+        list.innerHTML = '';
+
+        const allItems = [
+            ...database.pois.map(i => ({...i, type: 'Lieu'})),
+            ...database.labels.map(i => ({...i, type: 'Légende', name: i.text})),
+            ...database.zones.map(i => ({...i, type: 'Zone'}))
+        ];
+
+        allItems.filter(i => i.name.toLowerCase().includes(search)).forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'lib-item';
+            div.innerHTML = `
+                <h4>${item.name} <span class="tag">${item.type}</span></h4>
+                <div style="margin-top:10px; display:flex; justify-content:space-between; align-items:center">
+                    <span style="font-size:10px; opacity:0.5">${item.x ? item.x.toFixed(1) : 'Poly'} / ${item.y ? item.y.toFixed(1) : 'Poly'}</span>
+                    <button class="btn btn-del" onclick="deleteItem('${item.type}', ${item.id})">Supprimer</button>
+                </div>
+            `;
+            list.appendChild(div);
+        });
+    }
+
+    function deleteItem(type, id) {
+        if (!confirm("Supprimer cette archive ?")) return;
+        if (type === 'Lieu') database.pois = database.pois.filter(i => i.id !== id);
+        if (type === 'Légende') database.labels = database.labels.filter(i => i.id !== id);
+        if (type === 'Zone') database.zones = database.zones.filter(i => i.id !== id);
+        save();
+    }
+
+    function renderTemp() {
+        const t = document.getElementById('temp-layer');
+        t.innerHTML = '';
+        currentPath.forEach(pt => {
+            const d = document.createElement('div'); d.className = 'temp-dot';
+            d.style.left = pt.x + '%'; d.style.top = pt.y + '%';
+            t.appendChild(d);
+        });
+    }
+
+    function loadImg(e) {
+        const reader = new FileReader();
+        reader.onload = (ev) => document.getElementById('base-layer').src = ev.target.result;
+        reader.readAsDataURL(e.target.files[0]);
+    }
+
+    function exportData() {
+        const blob = new Blob([JSON.stringify(database)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = 'azeroth_nexus_save.json'; a.click();
+    }
+</script>
+</body>
+              </html>
+              
