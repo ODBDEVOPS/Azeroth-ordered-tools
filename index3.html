@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azeroth Nexus - Tactician Edition</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --gold: #c6a15b; --gold-dark: #846b3e; --bg: #0d0e12;
+            --panel: #1a1c23; --border: #323641; --accent: #4a5d8e; --text: #e2e2e2;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; height: 100vh; overflow: hidden; }
+        
+        header { 
+            height: 60px; background: #000; border-bottom: 2px solid var(--gold);
+            display: flex; align-items: center; padding: 0 20px; justify-content: space-between; z-index: 100;
+        }
+        .btn { 
+            background: var(--panel); border: 1px solid var(--gold-dark); color: var(--gold);
+            padding: 8px 12px; cursor: pointer; font-family: 'Cinzel'; font-size: 11px; transition: 0.2s;
+        }
+        .btn:hover, .btn.active { background: var(--gold); color: #000; }
+
+        #main { display: flex; height: calc(100vh - 60px); }
+
+        /* --- MAP SYSTEM --- */
+        #map-container { flex: 1; position: relative; background: #050505; overflow: hidden; cursor: crosshair; }
+        #map-wrapper { position: absolute; transform-origin: 0 0; }
+        .map-layer { position: absolute; top: 0; left: 0; pointer-events: none; }
+        #base-layer { position: relative; pointer-events: auto; }
+        
+        /* --- VECTORS & LINES --- */
+        svg#vector-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 40;
+        }
+        .route-line { stroke: var(--gold); stroke-width: 2; stroke-dasharray: 5; opacity: 0.6; }
+        .border-line { stroke: #ff4d4d; stroke-width: 3; opacity: 0.8; }
+
+        /* --- UI CONTROLS --- */
+        #map-tools {
+            position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.85);
+            padding: 15px; border: 1px solid var(--gold-dark); border-radius: 4px; display: flex; flex-direction: column; gap: 12px; z-index: 110;
+        }
+
+        /* --- SIDEBAR --- */
+        #sidebar { width: 400px; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+        .tab-content { flex: 1; overflow-y: auto; padding: 20px; }
+        
+        .lib-card { 
+            background: rgba(255,255,255,0.03); border-left: 3px solid var(--gold); 
+            padding: 12px; margin-bottom: 10px; position: relative; cursor: pointer;
+        }
+        .lib-card:hover { background: rgba(198, 161, 91, 0.1); }
+        .lib-card.selected { border-left-color: #fff; background: var(--accent); }
+
+        .marker {
+            position: absolute; width: 12px; height: 12px; border: 2px solid #fff;
+            background: var(--gold); border-radius: 50%; transform: translate(-50%, -50%);
+            box-shadow: 0 0 10px var(--gold); z-index: 60;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h2 style="font-family:'Cinzel'; color:var(--gold)">Azeroth <span style="font-weight:200">Nexus Tactician</span></h2>
+    <div style="display:flex; gap:10px">
+        <button class="btn" onclick="document.getElementById('file-map').click()">Charger Map</button>
+        <button class="btn" onclick="clearData()">Réinitialiser</button>
+        <input type="file" id="file-map" style="display:none" onchange="loadImg(event)">
+    </div>
+</header>
+
+<div id="main">
+    <div id="map-container">
+        <div id="map-tools">
+            <label style="font-size:9px">OUTILS DE LIAISON</label>
+            <button class="btn" id="link-mode-btn" onclick="toggleLinkMode()">Lier Marqueurs : OFF</button>
+            <select id="line-type" class="btn" style="text-align:left">
+                <option value="route-line">Route (Pointillés)</option>
+                <option value="border-line">Frontière (Plein)</option>
+            </select>
+            <div id="instruction" style="font-size:10px; color:var(--gold); display:none">Sélectionnez deux lieux dans la liste...</div>
+        </div>
+
+        <div id="map-wrapper">
+            <svg id="vector-layer"></svg>
+            <img id="base-layer" class="map-layer" src="https://via.placeholder.com/2000x1500/111/c6a15b?text=Chargez+votre+image+ici">
+            <div id="marker-layer"></div>
+        </div>
+    </div>
+
+    <aside id="sidebar">
+        <div style="display:flex">
+            <button class="btn active" style="flex:1">Bibliothèque & Liaisons</button>
+        </div>
+
+        <div class="tab-content">
+            <div id="lib-list"></div>
+        </div>
+    </aside>
+</div>
+
+<div id="modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:var(--panel); padding:20px; border:2px solid var(--gold); z-index:1000">
+    <h3 style="font-family:'Cinzel'; margin-bottom:15px">Nouvelle Archive</h3>
+    <input type="text" id="m-title" style="width:100%; padding:10px; background:#000; color:white; border:1px solid var(--border)" placeholder="Nom">
+    <button class="btn" style="width:100%; margin-top:10px" onclick="saveMarker()">Ajouter au Codex</button>
+</div>
+
+<script>
+    let scale = 1, x = 0, y = 0, isDragging = false;
+    let markers = JSON.parse(localStorage.getItem('ax_markers')) || [];
+    let connections = JSON.parse(localStorage.getItem('ax_links')) || [];
+    let isLinkMode = false, selectedForLink = [];
+    let lastPos = { x: 0, y: 0 };
+
+    const wrapper = document.getElementById('map-wrapper');
+    const container = document.getElementById('map-container');
+    const svgLayer = document.getElementById('vector-layer');
+
+    // INIT
+    window.onload = () => { renderMarkers(); renderLibrary(); renderLines(); };
+
+    // ZOOM & PAN
+    container.onwheel = (e) => {
+        e.preventDefault();
+        scale = Math.min(Math.max(0.2, scale * (e.deltaY > 0 ? 0.9 : 1.1)), 5);
+        update();
+    };
+
+    container.onmousedown = (e) => { 
+        if(e.target.id === 'base-layer') {
+            isDragging = true; startX = e.clientX - x; startY = e.clientY - y; 
+        }
+    };
+    window.onmousemove = (e) => { if (isDragging) { x = e.clientX - startX; y = e.clientY - startY; update(); } };
+    window.onmouseup = () => isDragging = false;
+    function update() { wrapper.style.transform = `translate(${x}px, ${y}px) scale(${scale})`; }
+
+    // MARKERS
+    document.getElementById('base-layer').onclick = (e) => {
+        if(isLinkMode) return;
+        const rect = e.target.getBoundingClientRect();
+        lastPos = { x: ((e.clientX - rect.left) / rect.width * 100), y: ((e.clientY - rect.top) / rect.height * 100) };
+        document.getElementById('modal').style.display = 'block';
+    };
+
+    function saveMarker() {
+        markers.push({ id: Date.now(), title: document.getElementById('m-title').value, x: lastPos.x, y: lastPos.y });
+        localStorage.setItem('ax_markers', JSON.stringify(markers));
+        document.getElementById('modal').style.display = 'none';
+        renderMarkers(); renderLibrary();
+    }
+
+    // LINKING SYSTEM
+    function toggleLinkMode() {
+        isLinkMode = !isLinkMode;
+        selectedForLink = [];
+        document.getElementById('link-mode-btn').classList.toggle('active');
+        document.getElementById('instruction').style.display = isLinkMode ? 'block' : 'none';
+        renderLibrary();
+    }
+
+    function handleCardClick(id) {
+        if(!isLinkMode) return;
+        
+        if(selectedForLink.includes(id)) {
+            selectedForLink = selectedForLink.filter(sid => sid !== id);
+        } else {
+            selectedForLink.push(id);
+        }
+
+        if(selectedForLink.length === 2) {
+            connections.push({
+                from: selectedForLink[0],
+                to: selectedForLink[1],
+                type: document.getElementById('line-type').value
+            });
+            localStorage.setItem('ax_links', JSON.stringify(connections));
+            selectedForLink = [];
+            renderLines();
+        }
+        renderLibrary();
+    }
+
+    function renderLines() {
+        svgLayer.innerHTML = '';
+        connections.forEach(link => {
+            const m1 = markers.find(m => m.id === link.from);
+            const m2 = markers.find(m => m.id === link.to);
+            if(m1 && m2) {
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute("x1", m1.x + "%");
+                line.setAttribute("y1", m1.y + "%");
+                line.setAttribute("x2", m2.x + "%");
+                line.setAttribute("y2", m2.y + "%");
+                line.setAttribute("class", link.type);
+                svgLayer.appendChild(line);
+            }
+        });
+    }
+
+    function renderMarkers() {
+        const layer = document.getElementById('marker-layer');
+        layer.innerHTML = '';
+        markers.forEach(m => {
+            const div = document.createElement('div');
+            div.className = 'marker'; div.style.left = m.x + '%'; div.style.top = m.y + '%';
+            layer.appendChild(div);
+        });
+    }
+
+    function renderLibrary() {
+        const list = document.getElementById('lib-list');
+        list.innerHTML = '';
+        markers.forEach(m => {
+            const isSelected = selectedForLink.includes(m.id);
+            list.innerHTML += `
+                <div class="lib-card ${isSelected ? 'selected' : ''}" onclick="handleCardClick(${m.id})">
+                    <h4 style="font-size:13px">${m.title}</h4>
+                    <small style="opacity:0.5">Coord: ${m.x.toFixed(1)} / ${m.y.toFixed(1)}</small>
+                </div>`;
+        });
+    }
+
+    function loadImg(e) {
+        const reader = new FileReader();
+        reader.onload = (ev) => document.getElementById('base-layer').src = ev.target.result;
+        reader.readAsDataURL(e.target.files[0]);
+    }
+
+    function clearData() {
+        if(confirm("Tout effacer ?")) {
+            localStorage.clear(); location.reload();
+        }
+    }
+</script>
+</body>
+</html>
