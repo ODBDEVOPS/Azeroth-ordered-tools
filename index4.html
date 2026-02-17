@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azeroth Nexus - Territory Master</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --gold: #c6a15b; --gold-dark: #846b3e; --bg: #0d0e12;
+            --panel: #1a1c23; --border: #323641; --text: #e2e2e2;
+            --color-void: rgba(128, 0, 128, 0.4);
+            --color-titan: rgba(0, 191, 255, 0.4);
+            --color-empire: rgba(255, 69, 0, 0.4);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; height: 100vh; overflow: hidden; }
+        
+        header { 
+            height: 60px; background: #000; border-bottom: 2px solid var(--gold);
+            display: flex; align-items: center; padding: 0 20px; justify-content: space-between; z-index: 100;
+        }
+
+        #main { display: flex; height: calc(100vh - 60px); }
+
+        /* --- MAP SYSTEM --- */
+        #map-container { flex: 1; position: relative; background: #050505; overflow: hidden; cursor: crosshair; }
+        #map-wrapper { position: absolute; transform-origin: 0 0; }
+        .map-layer { position: absolute; top: 0; left: 0; pointer-events: none; }
+        #base-layer { position: relative; pointer-events: auto; }
+        
+        /* --- SVG DRAWING LAYER --- */
+        svg#vector-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 40;
+        }
+        .route-line { stroke: var(--gold); stroke-width: 2; stroke-dasharray: 5; opacity: 0.6; }
+        .zone-poly { stroke-width: 1; stroke: white; cursor: pointer; pointer-events: auto; }
+        .zone-poly:hover { stroke-width: 3; opacity: 0.8; }
+
+        /* --- TOOLS --- */
+        #map-tools {
+            position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.85);
+            padding: 15px; border: 1px solid var(--gold-dark); border-radius: 4px; display: flex; flex-direction: column; gap: 10px; z-index: 110;
+        }
+        .btn { 
+            background: var(--panel); border: 1px solid var(--gold-dark); color: var(--gold);
+            padding: 8px 12px; cursor: pointer; font-family: 'Cinzel'; font-size: 11px; transition: 0.2s;
+        }
+        .btn.active { background: var(--gold); color: #000; }
+
+        /* --- SIDEBAR --- */
+        #sidebar { width: 350px; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px; overflow-y: auto; }
+        .lib-card { background: rgba(255,255,255,0.03); border-left: 3px solid var(--gold); padding: 10px; margin-bottom: 8px; font-size: 12px; }
+
+        .temp-dot { width: 8px; height: 8px; background: red; position: absolute; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h2 style="font-family:'Cinzel'; color:var(--gold)">Azeroth <span style="font-weight:200">Empire Mapper</span></h2>
+    <div style="display:flex; gap:10px">
+        <button class="btn" onclick="document.getElementById('file-map').click()">Charger Map</button>
+        <button class="btn" onclick="exportData()">Exporter JSON</button>
+        <input type="file" id="file-map" style="display:none" onchange="loadImg(event)">
+    </div>
+</header>
+
+<div id="main">
+    <div id="map-container">
+        <div id="map-tools">
+            <label style="font-size:9px">MODES D'ÉDITION</label>
+            <button class="btn" id="btn-poi" onclick="setMode('poi')">Placer Marqueur</button>
+            <button class="btn" id="btn-zone" onclick="setMode('zone')">Dessiner Zone</button>
+            
+            <label style="font-size:9px; margin-top:10px">COULEUR TERRITOIRE</label>
+            <select id="zone-color" class="btn">
+                <option value="rgba(128, 0, 128, 0.4)">Empire Noir (Violet)</option>
+                <option value="rgba(0, 191, 255, 0.4)">Titans (Bleu)</option>
+                <option value="rgba(255, 69, 0, 0.4)">Empires Trolls (Rouge)</option>
+                <option value="rgba(50, 205, 50, 0.4)">Nature (Vert)</option>
+            </select>
+            <div id="edit-hint" style="font-size:10px; color:var(--gold); max-width: 150px;">Mode Marqueur : Cliquez sur la carte.</div>
+        </div>
+
+        <div id="map-wrapper">
+            <svg id="vector-layer"></svg>
+            <img id="base-layer" class="map-layer" src="https://via.placeholder.com/2000x1500/111/c6a15b?text=Chargez+une+carte">
+            <div id="marker-layer"></div>
+            <div id="temp-layer"></div>
+        </div>
+    </div>
+
+    <aside id="sidebar">
+        <h3 style="font-family:'Cinzel'; margin-bottom:15px; font-size: 14px;">Archives du Monde</h3>
+        <div id="lib-list"></div>
+    </aside>
+</div>
+
+<script>
+    let scale = 1, x = 0, y = 0, isDragging = false;
+    let mode = 'poi'; // poi, zone
+    let markers = JSON.parse(localStorage.getItem('az_pois')) || [];
+    let zones = JSON.parse(localStorage.getItem('az_zones')) || [];
+    let currentPath = [];
+
+    const wrapper = document.getElementById('map-wrapper');
+    const container = document.getElementById('map-container');
+    const svgLayer = document.getElementById('vector-layer');
+    const tempLayer = document.getElementById('temp-layer');
+
+    window.onload = () => { renderAll(); updateModeButtons(); };
+
+    // NAVIGATION
+    container.onwheel = (e) => {
+        e.preventDefault();
+        scale = Math.min(Math.max(0.2, scale * (e.deltaY > 0 ? 0.9 : 1.1)), 5);
+        updateTransform();
+    };
+
+    container.onmousedown = (e) => {
+        if (e.button === 1 || (e.button === 0 && e.ctrlKey)) { 
+            isDragging = true; startX = e.clientX - x; startY = e.clientY - y; 
+        }
+    };
+    window.onmousemove = (e) => { if (isDragging) { x = e.clientX - startX; y = e.clientY - startY; updateTransform(); } };
+    window.onmouseup = () => isDragging = false;
+    function updateTransform() { wrapper.style.transform = `translate(${x}px, ${y}px) scale(${scale})`; }
+
+    // MODES
+    function setMode(m) {
+        mode = m;
+        currentPath = [];
+        tempLayer.innerHTML = '';
+        updateModeButtons();
+        const hint = document.getElementById('edit-hint');
+        hint.innerText = m === 'poi' ? "Mode Marqueur : Cliquez pour ajouter un lieu." : "Mode Zone : Cliquez points par points. Cliquez sur le premier point pour fermer.";
+    }
+
+    function updateModeButtons() {
+        document.getElementById('btn-poi').className = mode === 'poi' ? 'btn active' : 'btn';
+        document.getElementById('btn-zone').className = mode === 'zone' ? 'btn active' : 'btn';
+    }
+
+    // INTERACTION CARTE
+    document.getElementById('base-layer').onclick = (e) => {
+        const rect = e.target.getBoundingClientRect();
+        const px = ((e.clientX - rect.left) / rect.width * 100);
+        const py = ((e.clientY - rect.top) / rect.height * 100);
+
+        if (mode === 'poi') {
+            const name = prompt("Nom du lieu :");
+            if (name) {
+                markers.push({ name, x: px, y: py });
+                saveAndRender();
+            }
+        } else if (mode === 'zone') {
+            handleZoneDrawing(px, py);
+        }
+    };
+
+    function handleZoneDrawing(px, py) {
+        // Vérifier si on clique près du premier point pour fermer
+        if (currentPath.length > 2) {
+            const start = currentPath[0];
+            const dist = Math.sqrt(Math.pow(px - start.x, 2) + Math.pow(py - start.y, 2));
+            if (dist < 1.5) { // Seuil de fermeture
+                const title = prompt("Nom du territoire :");
+                if (title) {
+                    zones.push({ title, path: currentPath, color: document.getElementById('zone-color').value });
+                    currentPath = [];
+                    tempLayer.innerHTML = '';
+                    saveAndRender();
+                    return;
+                }
+            }
+        }
+        currentPath.push({ x: px, y: py });
+        renderTempPath();
+    }
+
+    function renderTempPath() {
+        tempLayer.innerHTML = '';
+        currentPath.forEach(pt => {
+            const dot = document.createElement('div');
+            dot.className = 'temp-dot';
+            dot.style.left = pt.x + '%'; dot.style.top = pt.y + '%';
+            tempLayer.appendChild(dot);
+        });
+    }
+
+    function saveAndRender() {
+        localStorage.setItem('az_pois', JSON.stringify(markers));
+        localStorage.setItem('az_zones', JSON.stringify(zones));
+        renderAll();
+    }
+
+    function renderAll() {
+        // Render POIs
+        const mLayer = document.getElementById('marker-layer');
+        mLayer.innerHTML = '';
+        markers.forEach(m => {
+            const d = document.createElement('div');
+            d.className = 'temp-dot'; d.style.background = 'var(--gold)';
+            d.style.left = m.x + '%'; d.style.top = m.y + '%';
+            d.title = m.name;
+            mLayer.appendChild(d);
+        });
+
+        // Render Zones (SVG)
+        svgLayer.innerHTML = '';
+        zones.forEach((z, idx) => {
+            const poly = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+            const pointsStr = z.path.map(p => `${p.x},${p.y}`).join(' ');
+            poly.setAttribute("points", pointsStr);
+            poly.setAttribute("class", "zone-poly");
+            poly.setAttribute("fill", z.color);
+            poly.onclick = () => { if(confirm(`Supprimer la zone ${z.title} ?`)) { zones.splice(idx, 1); saveAndRender(); } };
+            
+            const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+            title.textContent = z.title;
+            poly.appendChild(title);
+            svgLayer.appendChild(poly);
+        });
+
+        // Render Library
+        const list = document.getElementById('lib-list');
+        list.innerHTML = '<h4>Lieux</h4>';
+        markers.forEach(m => list.innerHTML += `<div class="lib-card"><b>${m.name}</b><br><small>${m.x.toFixed(1)}% / ${m.y.toFixed(1)}%</small></div>`);
+        list.innerHTML += '<h4 style="margin-top:20px">Territoires</h4>';
+        zones.forEach(z => list.innerHTML += `<div class="lib-card" style="border-left-color:${z.color}"><b>${z.title}</b></div>`);
+    }
+
+    function loadImg(e) {
+        const reader = new FileReader();
+        reader.onload = (ev) => document.getElementById('base-layer').src = ev.target.result;
+        reader.readAsDataURL(e.target.files[0]);
+    }
+
+    function exportData() {
+        const data = { markers, zones };
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'azeroth_research.json'; a.click();
+    }
+</script>
+</body>
+  </html>
+  
