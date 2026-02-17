@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azeroth Archival Command</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Inter:wght@300;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --gold: #c6a15b;
+            --gold-bright: #f1d399;
+            --dark-bg: #0a0b0e;
+            --panel-bg: #16181d;
+            --border: #3c3f4a;
+            --accent: #3a5285;
+            --text: #d1d1d1;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            background: var(--dark-bg); color: var(--text); 
+            font-family: 'Inter', sans-serif; height: 100vh; overflow: hidden; 
+        }
+
+        /* --- HEADER --- */
+        header {
+            height: 60px; background: #000; border-bottom: 2px solid var(--gold);
+            display: flex; align-items: center; padding: 0 20px; justify-content: space-between;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); z-index: 100;
+        }
+        .logo { font-family: 'Cinzel'; color: var(--gold); font-size: 1.2rem; letter-spacing: 2px; }
+
+        /* --- MAIN LAYOUT --- */
+        #app-container { display: flex; height: calc(100vh - 60px); width: 100%; }
+
+        /* --- MAP SECTION --- */
+        #map-section { flex: 1; position: relative; background: #000; overflow: hidden; cursor: crosshair; }
+        #map-wrapper { position: absolute; transform-origin: 0 0; }
+        #main-map { display: block; filter: sepia(0.2) contrast(1.1); }
+        
+        /* --- MARKERS --- */
+        .marker {
+            position: absolute; width: 14px; height: 14px; border-radius: 50%;
+            border: 2px solid var(--gold-bright); background: rgba(0,0,0,0.7);
+            transform: translate(-50%, -50%); cursor: pointer; transition: 0.2s;
+            box-shadow: 0 0 10px var(--gold);
+        }
+        .marker:hover { scale: 1.5; background: var(--gold); }
+
+        /* --- SIDEBARS --- */
+        .sidebar {
+            width: 400px; background: var(--panel-bg); border-left: 1px solid var(--border);
+            display: flex; flex-direction: column; z-index: 10; transition: 0.3s;
+        }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); background: rgba(0,0,0,0.2); }
+        .sidebar-content { flex: 1; overflow-y: auto; padding: 20px; }
+
+        /* --- UI ELEMENTS --- */
+        .tabs { display: flex; background: #000; }
+        .tab-btn { 
+            flex: 1; padding: 12px; border: none; background: transparent; color: var(--gold-dim); 
+            font-family: 'Cinzel'; cursor: pointer; border-bottom: 2px solid transparent;
+        }
+        .tab-btn.active { color: var(--gold); border-bottom: 2px solid var(--gold); background: var(--panel-bg); }
+
+        .input-group { margin-bottom: 15px; }
+        label { display: block; font-size: 10px; color: var(--gold); text-transform: uppercase; margin-bottom: 5px; }
+        input, textarea, select {
+            width: 100%; background: #0a0b0e; border: 1px solid var(--border); color: #fff;
+            padding: 10px; border-radius: 4px; font-size: 13px;
+        }
+        .btn-action {
+            width: 100%; padding: 12px; background: var(--gold); color: #000; border: none;
+            font-family: 'Cinzel'; font-weight: bold; cursor: pointer; margin-top: 10px;
+        }
+        .btn-action:hover { background: var(--gold-bright); }
+
+        /* --- LIBRARY CARDS --- */
+        .lib-card {
+            background: #23262e; border: 1px solid var(--border); padding: 15px;
+            border-radius: 6px; margin-bottom: 15px; position: relative;
+        }
+        .lib-card h4 { color: var(--gold); font-family: 'Cinzel'; margin-bottom: 5px; }
+        .lib-card small { color: var(--accent); font-weight: bold; text-transform: uppercase; font-size: 10px; }
+        .delete-btn { position: absolute; top: 10px; right: 10px; color: #ff4d4d; cursor: pointer; border: none; background: none; }
+
+        #coords-hud {
+            position: absolute; bottom: 20px; left: 20px; background: rgba(0,0,0,0.8);
+            padding: 5px 15px; border: 1px solid var(--gold); border-radius: 20px;
+            font-family: monospace; font-size: 12px; color: var(--gold); pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">Azeroth Codex v2.0</div>
+        <div style="display: flex; gap: 15px;">
+            <input type="file" id="map-input" style="display:none">
+            <button class="tab-btn" style="border:1px solid var(--gold)" onclick="document.getElementById('map-input').click()">Charger Carte</button>
+            <button class="tab-btn" onclick="exportData()">Exporter Recherche</button>
+        </div>
+    </header>
+
+    <div id="app-container">
+        <section id="map-section">
+            <div id="map-wrapper">
+                <img id="main-map" src="https://via.placeholder.com/3000x2000/111/c6a15b?text=Cliquez+sur+Charger+Carte" alt="Azeroth Map">
+                <div id="marker-layer"></div>
+            </div>
+            <div id="coords-hud">X: 0% | Y: 0%</div>
+        </section>
+
+        <aside class="sidebar">
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('prompt')">Générateur</button>
+                <button class="tab-btn" onclick="switchTab('library')">Bibliothèque</button>
+            </div>
+
+            <div id="tab-prompt" class="sidebar-content">
+                <div class="sidebar-header" style="padding:0 0 20px 0">
+                    <h3>Assistant IA</h3>
+                </div>
+                <div class="input-group">
+                    <label>Sujet de la requête</label>
+                    <input type="text" id="p-subject" placeholder="ex: Empire Amani vs Empire Noir">
+                </div>
+                <div class="input-group">
+                    <label>Filtre Lore</label>
+                    <select id="p-filter">
+                        <option value="Position relative et ressources visuelles">Position & Ressources</option>
+                        <option value="Détails des frontières et cités">Frontières & Cités</option>
+                        <option value="Analyse comparative historique">Comparaison Timeline</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label>Notes & Coordonnées</label>
+                    <textarea id="p-notes" rows="8" placeholder="Copiez les coordonnées ici..."></textarea>
+                </div>
+                <button class="btn-action" onclick="generatePrompt()">Générer le Master Prompt</button>
+                <textarea id="output-prompt" style="margin-top:15px; display:none; border-color:var(--gold); font-size: 11px;" rows="10" readonly></textarea>
+            </div>
+
+            <div id="tab-library" class="sidebar-content" style="display:none">
+                <div class="sidebar-header" style="padding:0 0 20px 0">
+                    <h3>Codex local</h3>
+                    <p style="font-size: 10px; opacity: 0.7;">Cliquez sur la carte pour créer une entrée.</p>
+                </div>
+                <div id="library-list">
+                    </div>
+            </div>
+        </aside>
+    </div>
+
+    <div id="modal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:var(--panel-bg); padding:30px; border:2px solid var(--gold); z-index:1000; width:350px;">
+        <h3 id="modal-coords" style="margin-bottom:15px; font-size:12px;">X:0 Y:0</h3>
+        <div class="input-group">
+            <label>Nom du lieu / Race</label>
+            <input type="text" id="m-name">
+        </div>
+        <div class="input-group">
+            <label>Catégorie</label>
+            <select id="m-cat">
+                <option value="Région">Région</option>
+                <option value="Capitale">Capitale</option>
+                <option value="Race">Race</option>
+                <option value="Artéfact">Artéfact</option>
+            </select>
+        </div>
+        <div class="input-group">
+            <label>Description Lore</label>
+            <textarea id="m-desc" rows="4"></textarea>
+        </div>
+        <button class="btn-action" onclick="saveMarker()">Enregistrer au Codex</button>
+        <button class="tab-btn" style="width:100%" onclick="closeModal()">Annuler</button>
+    </div>
+
+    <script>
+        let scale = 1, x = 0, y = 0, isDragging = false;
+        let lastClickCoords = { x: 0, y: 0 };
+        let researchData = JSON.parse(localStorage.getItem('azerothData')) || [];
+
+        const wrapper = document.getElementById('map-wrapper');
+        const mapImg = document.getElementById('main-map');
+        const hud = document.getElementById('coords-hud');
+
+        /* --- INITIALISATION --- */
+        window.onload = () => { renderLibrary(); renderMarkers(); };
+
+        /* --- NAVIGATION CARTE --- */
+        document.getElementById('map-section').onwheel = (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            scale = Math.min(Math.max(0.2, scale * delta), 4);
+            updateTransform();
+        };
+
+        document.getElementById('map-section').onmousedown = (e) => {
+            if(e.button === 0) { isDragging = true; startX = e.clientX - x; startY = e.clientY - y; }
+        };
+
+        window.onmousemove = (e) => {
+            if (isDragging) { x = e.clientX - startX; y = e.clientY - startY; updateTransform(); }
+            const rect = mapImg.getBoundingClientRect();
+            const px = ((e.clientX - rect.left) / rect.width * 100).toFixed(2);
+            const py = ((e.clientY - rect.top) / rect.height * 100).toFixed(2);
+            if(px >= 0 && px <= 100) hud.innerText = `X: ${px}% | Y: ${py}%`;
+        };
+
+        window.onmouseup = () => isDragging = false;
+
+        function updateTransform() { wrapper.style.transform = `translate(${x}px, ${y}px) scale(${scale})`; }
+
+        /* --- SYSTÈME DE MARQUEURS --- */
+        mapImg.onclick = (e) => {
+            const rect = mapImg.getBoundingClientRect();
+            lastClickCoords.x = ((e.clientX - rect.left) / rect.width * 100).toFixed(2);
+            lastClickCoords.y = ((e.clientY - rect.top) / rect.height * 100).toFixed(2);
+            
+            document.getElementById('modal-coords').innerText = `LOCALISATION : ${lastClickCoords.x}% / ${lastClickCoords.y}%`;
+            document.getElementById('modal').style.display = 'block';
+        };
+
+        function saveMarker() {
+            const entry = {
+                id: Date.now(),
+                name: document.getElementById('m-name').value,
+                cat: document.getElementById('m-cat').value,
+                desc: document.getElementById('m-desc').value,
+                x: lastClickCoords.x,
+                y: lastClickCoords.y
+            };
+            researchData.push(entry);
+            localStorage.setItem('azerothData', JSON.stringify(researchData));
+            closeModal();
+            renderLibrary();
+            renderMarkers();
+        }
+
+        function renderMarkers() {
+            const layer = document.getElementById('marker-layer');
+            layer.innerHTML = '';
+            researchData.forEach(m => {
+                const div = document.createElement('div');
+                div.className = 'marker';
+                div.style.left = m.x + '%';
+                div.style.top = m.y + '%';
+                div.title = m.name;
+                layer.appendChild(div);
+            });
+        }
+
+        /* --- BIBLIOTHÈQUE --- */
+        function renderLibrary() {
+            const list = document.getElementById('library-list');
+            list.innerHTML = '';
+            researchData.forEach(m => {
+                list.innerHTML += `
+                    <div class="lib-card">
+                        <button class="delete-btn" onclick="deleteEntry(${m.id})">×</button>
+                        <small>${m.cat} | X:${m.x}% Y:${m.y}%</small>
+                        <h4>${m.name}</h4>
+                        <p>${m.desc}</p>
+                    </div>
+                `;
+            });
+        }
+
+        function deleteEntry(id) {
+            researchData = researchData.filter(d => d.id !== id);
+            localStorage.setItem('azerothData', JSON.stringify(researchData));
+            renderLibrary(); renderMarkers();
+        }
+
+        /* --- PROMPT GENERATOR (MASTER PROMPT) --- */
+        function generatePrompt() {
+            const subject = document.getElementById('p-subject').value;
+            const filter = document.getElementById('p-filter').value;
+            const notes = document.getElementById('p-notes').value;
+            
+            // Compilation des données de la bibliothèque pour enrichir le prompt
+            const libraryContext = researchData.map(d => `- ${d.name} (${d.cat}): ${d.desc} [Pos: ${d.x}, ${d.y}]`).join('\n');
+
+            const masterPrompt = `Je souhaite reconstituer une carte synthétique d'Azeroth Ordonnée (Empire Noir/Titans).
+        
+SUJET PRÉCIS : ${subject}
+TYPE DE REQUÊTE : ${filter}
+
+CONTEXTE DE MA BIBLIOTHÈQUE :
+${libraryContext}
+
+NOTES SUPPLÉMENTAIRES :
+${notes}
+
+CONSIGNES : Fournis les meilleures ressources (images, articles, lore) détaillant la position relative, les frontières et les différences entre les versions historiques (Warcraft I-III vs WoW). Précise pour chaque ressource le niveau de détail (Macro/Meso/Micro).`;
+
+            const out = document.getElementById('output-prompt');
+            out.value = masterPrompt;
+            out.style.display = 'block';
+        }
+
+        /* --- UTILS --- */
+        function switchTab(tab) {
+            document.getElementById('tab-prompt').style.display = tab === 'prompt' ? 'block' : 'none';
+            document.getElementById('tab-library').style.display = tab === 'library' ? 'block' : 'none';
+            document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', (tab === 'prompt' && i === 0) || (tab === 'library' && i === 1)));
+        }
+
+        function closeModal() { document.getElementById('modal').style.display = 'none'; }
+        
+        document.getElementById('map-input').onchange = (e) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => { mapImg.src = ev.target.result; };
+            reader.readAsDataURL(e.target.files[0]);
+        };
+
+        function copyPrompt() {
+            document.getElementById('output-prompt').select();
+            document.execCommand('copy');
+            alert("Master Prompt copié !");
+        }
+    </script>
+</body>
+                  </html>
+  
